@@ -4,8 +4,8 @@ import (
 	"AIxVuln/misc"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,7 +35,7 @@ func (cm *ContextManager) AddContextManager(id string, contextManager *ContextMa
 }
 func (cm *ContextManager) SaveMemoryToFile(filename string) error {
 	memoryInfoJson, _ := json.Marshal(cm)
-	err := ioutil.WriteFile(filename, memoryInfoJson, 0644)
+	err := os.WriteFile(filename, memoryInfoJson, 0644)
 	return err
 }
 
@@ -43,17 +43,18 @@ func (cm *ContextManager) SetEventHandler(f func(string, string, int)) {
 	cm.eventHandler = f
 }
 
-func (cm *ContextManager) LoadMemoryByFile(filename string) error {
-	content, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return err
-	}
-	err = json.Unmarshal(content, &cm)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// TODO
+//func (cm *ContextManager) LoadMemoryByFile(filename string) error {
+//	content, err := ioutil.ReadFile(filename)
+//	if err != nil {
+//		return err
+//	}
+//	err = json.Unmarshal(content, &cm)
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
 
 func (cm *ContextManager) SetMemory(memory []openai.ChatCompletionMessage) {
 	cm.mu.Lock()

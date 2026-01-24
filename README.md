@@ -4,6 +4,22 @@ AIxVuln 是一个基于大模型（LLM）+ 工具调用（Function Calling）+ D
 
 系统通过 Web API 管理“项目(Project)”，为每个项目自动组织多类 Agent（环境搭建/代码审计/漏洞验证/报告生成），并在隔离的 Docker 环境内完成依赖安装、服务启动、PoC 验证与证据采集，最终产出可下载的报告。
 
+目前已通过该项目在真实目标中发现数十个真实漏洞。
+
+## 界面预览
+
+系统主界面：
+
+![系统主界面](docs/images/img-1.png)
+
+运行中实时漏洞列表（未验证）：
+
+![实时漏洞列表（未验证）](docs/images/img-2.png)
+
+实时产生的漏洞报告（已验证）：
+
+![实时漏洞报告（已验证）](docs/images/img-3.png)
+
 ## 特性
 
 - **项目化管理**
@@ -48,7 +64,7 @@ AIxVuln 是一个基于大模型（LLM）+ 工具调用（Function Calling）+ D
   - Task 模型、沙箱 Sandbox、漏洞管理 VulnManager、项目/容器信息结构等
 
 - **toolCalling/**
-  - ToolManager 与各类工具（源代码树/正则搜索/按行读取/Docker run&exec/logs/SQL/Python/PHP 执行/漏洞提交等）
+  - 工具调用框架与工具执行层：提供工具注册、参数解析与统一调度，供各类 Agent 以结构化方式调用外部能力
 
 - **dockerManager/**
   - Docker 操作封装：容器创建/exec/logs/remove、端口映射解析
@@ -76,6 +92,7 @@ AIxVuln 的核心是“多 Agent + 工具调用”的编排模式。每个 Agent
   - 自动识别项目技术栈并选择合适的运行环境（PHP/Java/Node.js/Python/Go 等）进行搭建
   - 支持常见依赖安装、服务启动、基础连通性检查等运维动作
   - 环境搭建成功后，会将可复用的环境信息写入关键消息（例如可访问地址、端口、登录线索等），供 Analyze/Verifier 等其它 Agent 直接复用
+  - 支持在 Web 中直接访问 Ops 搭建的运行环境（基于环境信息/端口映射），用于报告存疑时快速手动验证
 
 - **AgentGroup 分组与继承机制**
   - `ProjectManager` 以 AgentGroup 为单位调度：组内并发、组间串行（保证依赖关系）
@@ -95,9 +112,13 @@ AIxVuln 的核心是“多 Agent + 工具调用”的编排模式。每个 Agent
     - 系统会将“共享上下文中的关键消息/候选列表”等信息提供给模型，使模型知道当前存在多个 Agent 同时在推进任务
     - 当某个 Agent 发现有价值的信息（例如新的线索、可利用路径、环境访问方式），会写入共享上下文，其他 Agent 在后续推理中即可读取并继续推进
 
+  - Issue 反馈：当 Agent 发现框架/工具存在问题或需要新增能力时，会将 Issue 记录到 `Issue.log`，建议定期查看并迭代工具能力
+
 ## 配置
 
 配置文件为根目录 `config.ini`。
+
+本项目测试使用 **GLM-4.7** 模型（默认配置位于 `main_setting.MODEL`）。
 
 - `[misc]`
   - `DATA_DIR`：数据目录，默认 `./data`
@@ -162,16 +183,29 @@ go run .
 
 默认监听：`0.0.0.0:9999`
 
+本仓库不提供前端 UI。如需可视化交互，请在启动本服务后，再启动前端仓库：
+
+`https://github.com/qqliushiyu/AIxVuln_Web`
+
+### 运行（二进制）
+
+你也可以直接从 GitHub Releases 下载已编译的二进制文件运行：
+
+- **[下载]**
+  - 打开本仓库 Releases 页面，下载对应平台的可执行文件
+- **[运行]**
+  - 赋予可执行权限（如需要）后直接运行
+
 ## 扩展指南
 
-- 新增/修改工具：在 `toolCalling/` 中实现 `Handler` 并注册到对应 Agent 的 `ToolManager`
+- 新增/修改工具：在 `toolCalling/` 中实现工具能力，并注册到对应 Agent 的工具列表
 - 新增 Agent：在 `agents/` 中实现 `Agent` 接口，并在 `ProjectManager/Start.go` 中组装进流程
 - 新增运行环境：在 `dockerManager/ServiceManager` 增加对应 `StartXXXEnv` 封装
 
 ## TODO
 
 1. 引入决策者 Agent，通过与决策 Agent 对话来实现多 Agent 调用，协同完成复杂任务
-2. 增加环境感知 Agent：从现有运行环境中获取 `EnvInfo` 与源码信息，并写入共享上下文/关键消息，提供给分析者与验证者复用
+2. 增加环境感知 Agent（Ops类）：从现有运行环境中获取 `EnvInfo` 与源码信息，并写入共享上下文/关键消息，提供给分析者与验证者复用
 
 ## 注意事项
 

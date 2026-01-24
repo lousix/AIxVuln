@@ -2,9 +2,7 @@ package llm
 
 import (
 	"AIxVuln/misc"
-	"encoding/json"
 	"log"
-	"os"
 	"strings"
 	"sync"
 
@@ -30,23 +28,24 @@ func (cm *SharedContext) AddContextManager(id string, contextManager *ContextMan
 	cm.Contexts[id] = contextManager
 }
 
-func (cm *SharedContext) SaveMemoryToFile(filename string) error {
-	memoryInfoJson, _ := json.Marshal(cm)
-	err := os.WriteFile(filename, memoryInfoJson, 0644)
-	return err
-}
-
-func (cm *SharedContext) LoadMemoryByFile(filename string) error {
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return err
-	}
-	err = json.Unmarshal(content, &cm)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// TODO
+//func (cm *SharedContext) SaveMemoryToFile(filename string) error {
+//	memoryInfoJson, _ := json.Marshal(cm)
+//	err := os.WriteFile(filename, memoryInfoJson, 0644)
+//	return err
+//}
+//
+//func (cm *SharedContext) LoadMemoryByFile(filename string) error {
+//	content, err := os.ReadFile(filename)
+//	if err != nil {
+//		return err
+//	}
+//	err = json.Unmarshal(content, &cm)
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
 
 func (cm *SharedContext) SetEventHandler(f func(string, string, int)) {
 	cm.eventHandler = f

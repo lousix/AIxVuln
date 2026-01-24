@@ -383,7 +383,7 @@ func (pm *ProjectManager) UpdateVuln(id string, status string) {
 
 func (pm *ProjectManager) AddEvent(mod string, msg string, level int) {
 	timeStr := time.Now().Format("2006-01-02 15:04:05")
-	msgx := WebMsg{Type: "string", Data: fmt.Sprintf("[%s][%s]: %s", timeStr, mod, msg)}
+	msgx := WebMsg{Type: "string", Data: fmt.Sprintf("[%s][%s]: %s", timeStr, mod, msg), ProjectName: pm.GetProjectName()}
 	pm.msgChan <- msgx
 	pm.eventList = append(pm.eventList, msgx.Data.(string))
 }
