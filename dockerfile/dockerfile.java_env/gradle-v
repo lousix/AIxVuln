@@ -1,0 +1,2 @@
+#!/bin/bash
+rm -rf /root/.sdkman/candidates/gradle/current && ln -s /root/.sdkman/candidates/gradle/$1 /root/.sdkman/candidates/gradle/current

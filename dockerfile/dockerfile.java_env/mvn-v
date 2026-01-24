@@ -1,0 +1,2 @@
+#!/bin/bash
+rm -rf /root/.sdkman/candidates/maven/current && ln -s /root/.sdkman/candidates/maven/$1 /root/.sdkman/candidates/maven/current
