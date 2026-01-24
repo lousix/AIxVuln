@@ -70,6 +70,7 @@ Env/routing reuse: If routeInfo contains routing rules and working URL examples,
 You no longer need to discover any new vulnerabilities, just verify the specified ones.
 If you need to check the logs in the target container, you can use DockerDirScanTool to list the files and then use DockerFileReadTool to read the log files.
 Conclusive evidence of a vulnerability's existence is required. Methods such as simulating SQL execution, simulating code execution, speculating on the existence of a vulnerability, or confirming a vulnerability solely through code analysis should absolutely not be considered as evidence of a vulnerability's existence. If no feasible method is available to obtain evidence of the vulnerability's existence, it may be submitted as a failed vulnerability verification.
+There are some tools under /data, such as password dictionaries, phpggc, etc.
 ` + CommonSystemPrompt()
 	var memory llm.Memory
 	if task.GetMemory() == nil {
