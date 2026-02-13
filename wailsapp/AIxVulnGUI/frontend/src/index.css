@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.9rem;
+
+    /* Cyber dark palette */
+    --background: 224 65% 4%;
+    --foreground: 210 40% 96%;
+
+    --card: 225 45% 7%;
+    --card-foreground: 210 40% 96%;
+
+    --popover: 225 45% 7%;
+    --popover-foreground: 210 40% 96%;
+
+    --primary: 186 100% 50%;
+    --primary-foreground: 224 65% 4%;
+
+    --secondary: 259 88% 62%;
+    --secondary-foreground: 210 40% 96%;
+
+    --muted: 223 30% 14%;
+    --muted-foreground: 215 20% 70%;
+
+    --accent: 155 100% 50%;
+    --accent-foreground: 224 65% 4%;
+
+    --destructive: 346 84% 60%;
+    --destructive-foreground: 210 40% 96%;
+
+    --border: 215 40% 18%;
+    --input: 215 40% 18%;
+    --ring: 186 100% 50%;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .cyber-bg {
+    background:
+      radial-gradient(1200px 600px at 20% 10%, rgba(106, 0, 255, 0.25), transparent 60%),
+      radial-gradient(900px 500px at 85% 25%, rgba(0, 229, 255, 0.22), transparent 55%),
+      radial-gradient(900px 600px at 60% 95%, rgba(0, 255, 170, 0.12), transparent 55%),
+      linear-gradient(180deg, #050a14 0%, #040713 60%, #030512 100%);
+  }
+}
