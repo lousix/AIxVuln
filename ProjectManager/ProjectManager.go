@@ -1,57 +1,55 @@
 package ProjectManager
 
 import (
+	"AIxVuln/DecisionBrain"
 	"AIxVuln/agents"
 	"AIxVuln/dockerManager"
 	"AIxVuln/misc"
 	"AIxVuln/taskManager"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type ProjectManager struct {
-	mu                  sync.RWMutex
-	wg                  *sync.WaitGroup
-	tasks               []*taskManager.Task
-	projectName         string
-	agentGroupList      AgentGroupList
-	goroutine           chan func()
-	analyzeAgentNumber  int
-	verifierAgentNumber int
-	sourceCodeDir       string
-	projectDir          string
-	containerList       []taskManager.ContainerInfo
-	vulnList            []taskManager.Vuln //整个项目的漏洞汇总
-	eventList           []string
-	agentRespList       map[string]*agents.StartResp
-	reportList          map[string]string
-	status              string
-	startTime           string
-	endTime             string
-	stopChan            chan struct{}
-	ctx                 context.Context
-	cancelFunc          context.CancelFunc
-	isStopping          bool
-	isRunning           bool
-	msgChan             chan WebMsg
-	envInfo             map[string]interface{}
-	dm                  *dockerManager.DockerManager
+	mu             sync.RWMutex
+	wg             *sync.WaitGroup
+	tasks          []*taskManager.Task
+	projectName    string
+	taskContent    string
+	agentGroupList AgentGroupList
+	goroutine      chan func()
+	sourceCodeDir  string
+	projectDir     string
+	containerList  []taskManager.ContainerInfo
+	vulnList       []taskManager.Vuln //整个项目的漏洞汇总
+	eventList      []string
+	agentRespList  map[string]*agents.StartResp
+	reportList     map[string]string
+	status         string
+	startTime      string
+	endTime        string
+	stopChan       chan struct{}
+	ctx            context.Context
+	cancelFunc     context.CancelFunc
+	isStopping     bool
+	isRunning      bool
+	msgChan        chan string
+	envInfo        map[string]interface{}
+	dm             *dockerManager.DockerManager
+	decisionBrain  *DecisionBrain.DecisionBrain
+	brainRestart   chan struct{}
 }
 
 type ProjectConfig struct {
-	ProjectName         string
-	AnalyzeAgentNumber  int
-	VerifierAgentNumber int
-	SourceCodeDir       string
-	MsgChan             chan WebMsg
+	ProjectName   string
+	SourceCodeDir string
+	MsgChan       chan string
+	TaskContent   string
 }
 
 type AgentGroup struct {
@@ -103,24 +101,57 @@ func NewProjectManager(project ProjectConfig) (*ProjectManager, error) {
 		return nil, err
 	}
 	pm := ProjectManager{
-		wg:                  &sync.WaitGroup{},
-		projectName:         project.ProjectName,
-		goroutine:           make(chan func(), 100),
-		analyzeAgentNumber:  project.AnalyzeAgentNumber,
-		verifierAgentNumber: project.VerifierAgentNumber,
-		sourceCodeDir:       sourceCodeDir,
-		projectDir:          projectDir,
-		agentRespList:       make(map[string]*agents.StartResp),
-		reportList:          make(map[string]string),
-		status:              "未运行",
-		stopChan:            make(chan struct{}, 1), // 带缓冲的通道
-		isStopping:          false,
-		isRunning:           false,
-		msgChan:             project.MsgChan,
-		dm:                  dockerManager.NewDockerManager(),
+		wg:            &sync.WaitGroup{},
+		projectName:   project.ProjectName,
+		taskContent:   project.TaskContent,
+		goroutine:     make(chan func(), 100),
+		sourceCodeDir: sourceCodeDir,
+		projectDir:    projectDir,
+		agentRespList: make(map[string]*agents.StartResp),
+		reportList:    make(map[string]string),
+		status:        "未运行",
+		stopChan:      make(chan struct{}, 1), // 带缓冲的通道
+		isStopping:    false,
+		isRunning:     false,
+		brainRestart:  make(chan struct{}, 1),
+		msgChan:       project.MsgChan,
+		dm:            dockerManager.NewDockerManager(),
 	}
 	pm.ctx, pm.cancelFunc = context.WithCancel(context.Background())
 	pm.goroutineOps()
+	taskManager.SetDockerManager(pm.projectName, pm.dm)
+	sandbox := dockerManager.NewSandbox(pm.dm, sourceCodeDir)
+	taskManager.SetSandbox(pm.projectName, sandbox)
+	sm := dockerManager.NewServiceManager(sourceCodeDir, pm.dm)
+	taskManager.SetServiceManager(pm.projectName, sm)
+	taskManager.SetGoroutineChan(pm.projectName, pm.goroutine)
+	pm.decisionBrain = DecisionBrain.NewDecisionBrain(project.ProjectName, project.TaskContent, project.MsgChan)
+	pm.decisionBrain.SetStatusHandler(func(status string) {
+		pm.status = status
+	})
+	as, _ := agents.GetAgentDescription()
+	for _, v := range as {
+		pm.decisionBrain.RegisterAgent(v.Name, v.NewFunc)
+	}
+	// Load digital human profiles from SQLite.
+	dhMap := misc.GetAllDigitalHumans()
+	pool := make(map[string][]agents.AgentProfile)
+	for agentType, rows := range dhMap {
+		profiles := make([]agents.AgentProfile, 0, len(rows))
+		for _, r := range rows {
+			profiles = append(profiles, agents.AgentProfile{
+				DigitalHumanID: r.ID,
+				PersonaName:    r.PersonaName,
+				Gender:         r.Gender,
+				AvatarFile:     r.AvatarFile,
+				Personality:    r.Personality,
+				Age:            r.Age,
+				ExtraSysPrompt: r.ExtraSysPrompt,
+			})
+		}
+		pool[agentType] = profiles
+	}
+	pm.decisionBrain.InitDigitalHumanPool(pool)
 	return &pm, nil
 }
 
@@ -128,21 +159,16 @@ func (pm *ProjectManager) GetDockerManager() *dockerManager.DockerManager {
 	return pm.dm
 }
 
-func (pm *ProjectManager) SetMsgChan(msgChan chan WebMsg) {
+func (pm *ProjectManager) SetMsgChan(msgChan chan string) {
 	pm.msgChan = msgChan
-}
-func (pm *ProjectManager) AddTask(task *taskManager.Task) {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-	task.SetEventHandler(pm.AddEvent)
-	task.SetReportHandler(pm.AddReport)
-	task.SetEnvInfoHandler(pm.SetEnvInfo)
-	task.SetAddTaskHandler(pm.AddTask)
-	pm.tasks = append(pm.tasks, task)
 }
 
 func (pm *ProjectManager) GetProjectName() string {
 	return pm.projectName
+}
+
+func (pm *ProjectManager) GetTaskContent() string {
+	return pm.taskContent
 }
 func (pm *ProjectManager) GetStatus() string {
 	return pm.status
@@ -175,133 +201,98 @@ func (pm *ProjectManager) goroutineOps() {
 	}()
 }
 
-func (pm *ProjectManager) startTask() {
+func (pm *ProjectManager) StartTask() {
+	if pm.taskContent == "" {
+		pm.status = "任务内容为空"
+		return
+	}
 	if pm.isRunning {
 		return
 	}
 	pm.status = "正在运行"
 	pm.isRunning = true
 	pm.isStopping = false
+	pm.startTime = time.Now().Format("2006-01-02 15:04:05")
 	defer func() {
 		pm.status = "运行结束"
 		pm.isRunning = false
 		pm.endTime = time.Now().Format("2006-01-02 15:04:05")
 	}()
 
-	pm.startTime = time.Now().Format("2006-01-02 15:04:05")
+	// ---- Phase 0: Run ProjectOverviewAgent to scan the project before the brain starts. ----
+	pm.status = "项目概览分析中"
+	misc.Debug("StartTask: 开始项目概览分析")
+	pm.decisionBrain.EmitBrainMessage("正在进行项目概览分析，识别编程语言、框架和技术栈...")
+	overviewSummary := pm.runProjectOverview()
+	if overviewSummary != "" {
+		pm.decisionBrain.SetProjectOverview(overviewSummary)
+		misc.Debug("StartTask: 项目概览完成，已注入决策大脑")
+		pm.decisionBrain.EmitBrainMessage("项目概览分析完成:\n" + overviewSummary)
+	} else {
+		misc.Debug("StartTask: 项目概览未产生结果，跳过注入")
+		pm.decisionBrain.EmitBrainMessage("项目概览分析未产生结果，跳过")
+	}
+	pm.status = "正在运行"
 
 	for {
-		// 检查全局停止信号
-		select {
-		case <-pm.ctx.Done():
-			pm.AddEvent("项目管理", "收到停止信号，退出主流程", 0)
-			return
-		default:
-		}
-
-		agentGroup := pm.agentGroupList.nextAgentGroup()
-		if agentGroup == nil {
-			break // 所有组都运行完毕
-		}
-
-		wg := &sync.WaitGroup{}
-		// 计算需要启动的 agent 数量
-		wg.Add(len(agentGroup.AgentList))
-
-		for _, agent := range agentGroup.AgentList {
-			// 在启动每个 agent 前再次检查
-			select {
-			case <-pm.ctx.Done():
-				// 如果已经停止，就不需要启动新的 agent 了，但也需要伪造 wg.Done 以免死锁
-				wg.Done()
-				continue
-			default:
-			}
-			t := agent.Agent.GetTask()
-
-			if agent.InheritEnv != "" {
-				pm.mu.Lock()
-				x, e := pm.agentRespList[agent.InheritEnv]
-				pm.mu.Unlock()
-				if !e || x == nil || x.Memory == nil {
-					pm.AddEvent(agent.Agent.Name(), agent.InheritEnv+"没有运行结果，所以无法继承env", 0)
-				} else {
-					keyMsg := x.Memory.GetKeyMessage("")
-					js, _ := json.Marshal(keyMsg)
-					fmt.Println("继承关键信息:" + string(js))
-					agent.Agent.SetKeyMessage(keyMsg)
-					t.SetEnvInfo(x.EvnInfo)
-
-				}
-			}
-
-			if agent.InheritVuln != "" {
-				pm.mu.Lock()
-				x, e := pm.agentRespList[agent.InheritVuln]
-				pm.mu.Unlock()
-				if !e || x == nil {
-					pm.AddEvent(agent.Agent.Name(), agent.InheritVuln+"没有运行结果，所以无法继承Vuln", 0)
-				} else {
-					t.GetVulnManager().SetVulnList(x.Vuln)
-				}
-			}
-			if agent.InheritMemory != "" {
-				pm.mu.Lock()
-				x, e := pm.agentRespList[agent.InheritMemory]
-				pm.mu.Unlock()
-				if !e || x == nil || x.Memory == nil {
-					pm.AddEvent(agent.Agent.Name(), agent.InheritMemory+"没有运行结果，所以无法继承Memory", 0)
-				} else {
-					agent.Agent.SetMemory(x.Memory)
-				}
-			}
-			go func(a *AgentOne) {
-				defer wg.Done()
-
-				// 在 goroutine 内部也要第一时间检查
-				select {
-				case <-pm.ctx.Done():
-					return
-				default:
-				}
-				resp := a.Agent.StartTask(pm.ctx)
-
-				if resp.Err != nil {
-					// 检查是否是因为 context 取消导致的错误
-					if pm.ctx.Err() != nil {
-						pm.AddEvent(a.Agent.Name(), "任务被强制停止", 0)
-					} else {
-						misc.Warn("Agent运行错误", resp.Err.Error(), pm.AddEvent)
-					}
-				} else {
-					pm.mu.Lock()
-					pm.agentRespList[a.Agent.GetId()] = resp
-					pm.mu.Unlock()
-				}
-			}(agent)
-		}
-
-		done := make(chan struct{})
+		pm.wg.Add(1)
 		go func() {
-			wg.Wait()
-			close(done)
+			defer pm.wg.Done()
+			pm.decisionBrain.Start()
 		}()
+		pm.wg.Wait()
 
+		// If brain entered "决策结束" state, stay alive and wait for user to
+		// either chat (which restarts the brain) or click "结束项目".
+		if !pm.decisionBrain.IsBrainFinished() {
+			break
+		}
+		// Block here until TeamChat calls RestartAfterFinished + signals, or StopTask is called.
 		select {
-		case <-done:
-			if !pm.isStopping { // 只有在没有停止信号时才标记为运行完成
-				agentGroup.Runed = true
-				misc.Success(agentGroup.Name, "Agent 组运行完毕", pm.AddEvent)
-			}
+		case <-pm.brainRestart:
+			// User sent a chat message — loop back and run Start() again.
+			continue
 		case <-pm.ctx.Done():
-			// 收到停止信号
-			misc.Warn(agentGroup.Name, "Agent组收到停止指令，等待当前任务结束...", pm.AddEvent)
-			wg.Wait()
+			// StopTask was called — exit.
 			return
 		}
 	}
+}
 
-	pm.wg.Wait()
+// runProjectOverview runs the ProjectOverviewAgent synchronously and returns the summary.
+func (pm *ProjectManager) runProjectOverview() string {
+	task := taskManager.NewTask(pm.projectName)
+	task.SetEventHandler(func(agentName string, event string, eventType int) {
+		// Minimal event handler — overview events are not critical.
+		misc.Debug("[ProjectOverview] %s: %s", agentName, event)
+	})
+	agent, err := agents.NewProjectOverviewAgent(task, "{}")
+	if err != nil {
+		misc.Debug("runProjectOverview: 创建 agent 失败: %s", err.Error())
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(pm.ctx, 3*time.Minute)
+	defer cancel()
+	// Start the persistent StartTask loop in a goroutine, then send the task via AssignTask.
+	doneCh := make(chan *agents.StartResp, 1)
+	go agent.StartTask(ctx)
+	agent.AssignTask(agents.TaskAssignment{
+		ArgsJson: "{}",
+		DoneCb: func(r *agents.StartResp) {
+			doneCh <- r
+		},
+	})
+	select {
+	case resp := <-doneCh:
+		if resp.Err != nil {
+			misc.Debug("runProjectOverview: agent 执行失败: %s", resp.Err.Error())
+			return ""
+		}
+		return resp.Summary
+	case <-ctx.Done():
+		misc.Debug("runProjectOverview: context 超时")
+		return ""
+	}
 }
 
 func (pm *ProjectManager) StopTask() {
@@ -313,87 +304,56 @@ func (pm *ProjectManager) StopTask() {
 	}
 	pm.status = "正在停止"
 	pm.isStopping = true
+	if pm.decisionBrain != nil {
+		pm.decisionBrain.Stop()
+	}
 	// 关键：调用 context 的取消函数
 	if pm.cancelFunc != nil {
 		pm.cancelFunc()
 	}
 }
-func (pm *ProjectManager) RemoveDockerAll() {
-	for _, v := range pm.containerList {
-		pm.dm.DockerRemove(v.ContainerId)
-	}
-}
-
-func (pm *ProjectManager) GetGoroutine() chan func() {
-	return pm.goroutine
-}
-
-func (pm *ProjectManager) AddAgent(agentList *AgentGroup) {
-	pm.mu.Lock()
-	defer pm.mu.Unlock()
-	if agentList.Name == "" {
-		agentList.Name = "AgentGroup-" + uuid.New().String()
-	}
-	pm.agentGroupList.putAgentGroup(agentList)
-}
-
 func (pm *ProjectManager) GetContainerList() []taskManager.ContainerInfo {
+	if pm.decisionBrain != nil {
+		cl := pm.decisionBrain.GetContainerList()
+		if len(cl) > 0 {
+			out := make([]taskManager.ContainerInfo, 0, len(cl))
+			for _, c := range cl {
+				if c == nil {
+					continue
+				}
+				out = append(out, *c)
+			}
+			return out
+		}
+	}
 	return pm.containerList
 }
-
-func (pm *ProjectManager) AddContainerInfo(infoStr string) {
-	var containerInfo taskManager.ContainerInfo
-	err := json.Unmarshal([]byte(infoStr), &containerInfo)
-	if err != nil {
-		misc.Warn("容器事件管理", "格式不正确："+infoStr, pm.AddEvent)
-	}
-	if containerInfo.Type == "Remove" {
-		result := make([]taskManager.ContainerInfo, 0, len(pm.containerList))
-		for _, container := range pm.containerList {
-			if container.ContainerId != containerInfo.ContainerId {
-				result = append(result, container)
-			}
-		}
-		pm.containerList = result
-		misc.Warn("容器事件", fmt.Sprintf("删除容器：%s", infoStr), pm.AddEvent)
-		pm.msgChan <- WebMsg{Type: "ContainerRemove", Data: map[string]interface{}{"containerId": containerInfo.ContainerId}, ProjectName: pm.GetProjectName()}
-		return
-	}
-	misc.Success("容器事件", fmt.Sprintf("新容器：%s", infoStr), pm.AddEvent)
-	pm.msgChan <- WebMsg{Type: "ContainerAdd", Data: containerInfo, ProjectName: pm.GetProjectName()}
-	pm.containerList = append(pm.containerList, containerInfo)
-}
-
-func (pm *ProjectManager) AddVulnInfo(vuln taskManager.Vuln) {
-	misc.Success("漏洞事件", fmt.Sprintf("新漏洞点：%s", vuln.VulnId), pm.AddEvent)
-	pm.msgChan <- WebMsg{Type: "VulnAdd", Data: vuln, ProjectName: pm.GetProjectName()}
-	pm.vulnList = append(pm.vulnList, vuln)
-}
-
-func (pm *ProjectManager) UpdateVuln(id string, status string) {
-	for i, candidate := range pm.vulnList {
-		if candidate.VulnId == id {
-			candidate.Status = status
-			pm.vulnList[i] = candidate
-			pm.msgChan <- WebMsg{Type: "VulnStatus", Data: map[string]interface{}{"status": status, "vuln_id": id}, ProjectName: pm.GetProjectName()}
-			misc.Success("漏洞事件", fmt.Sprintf("漏洞状态更新：%s -> %s", id, status), pm.AddEvent)
-		}
-	}
-}
-
-func (pm *ProjectManager) AddEvent(mod string, msg string, level int) {
-	timeStr := time.Now().Format("2006-01-02 15:04:05")
-	msgx := WebMsg{Type: "string", Data: fmt.Sprintf("[%s][%s]: %s", timeStr, mod, msg), ProjectName: pm.GetProjectName()}
-	pm.msgChan <- msgx
-	pm.eventList = append(pm.eventList, msgx.Data.(string))
-}
-
 func (pm *ProjectManager) GetEvent(count int) []string {
+	if pm.decisionBrain != nil {
+		e := pm.decisionBrain.GetEvent(count)
+		if len(e) > 0 {
+			return e
+		}
+	}
 	l := len(pm.eventList)
 	if l < count || l == 0 {
 		return pm.eventList
 	}
 	return pm.eventList[l-count:]
+}
+
+func (pm *ProjectManager) GetBrainFeed(count int) []map[string]interface{} {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetBrainFeed(count)
+}
+
+func (pm *ProjectManager) GetAgentFeed(agentID string, count int) []map[string]interface{} {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetAgentFeed(agentID, count)
 }
 
 func (pm *ProjectManager) GetVulnList() []taskManager.Vuln {
@@ -405,9 +365,6 @@ func (pm *ProjectManager) SetVulns(vuln []taskManager.Vuln) {
 func (pm *ProjectManager) SetEvent(event []string) {
 	pm.eventList = event
 }
-func (pm *ProjectManager) SetContainer(cl []taskManager.ContainerInfo) {
-	pm.containerList = cl
-}
 func (pm *ProjectManager) SetProjectDir(dir string) {
 	pm.projectDir = dir
 }
@@ -417,21 +374,159 @@ func (pm *ProjectManager) SetStartTime(t string) {
 func (pm *ProjectManager) SetEndTime(t string) {
 	pm.endTime = t
 }
+func (pm *ProjectManager) GetReportList() map[string]string {
+	if pm.decisionBrain != nil {
+		rl := pm.decisionBrain.GetReportList()
+		if len(rl) > 0 {
+			m := make(map[string]string)
+			for i, item := range rl {
+				rid, _ := item["rid"]
+				vid, ok1 := item["vid"]
+				path, ok2 := item["path"]
+				if !ok1 || !ok2 {
+					continue
+				}
+				key := rid
+				if key == "" {
+					key = vid
+				}
+				if key == "" {
+					key = filepath.Base(path)
+					if key == "" {
+						key = fmt.Sprintf("report-%d", i)
+					}
+				}
+				if _, exists := m[key]; exists {
+					key = fmt.Sprintf("%s-%d", key, i)
+				}
+				m[key] = path
+			}
+			return m
+		}
+	}
+	return pm.reportList
+}
+func (pm *ProjectManager) GetEnvInfo() map[string]interface{} {
+	if pm.decisionBrain != nil {
+		env := pm.decisionBrain.GetEnvInfo()
+		if len(env) > 0 {
+			return env
+		}
+	}
+	return pm.envInfo
+}
+
+func (pm *ProjectManager) GetExploitIdeaList() []*taskManager.ExploitIdea {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetExploitIdeaList()
+}
+
+func (pm *ProjectManager) GetExploitChainList() []*taskManager.ExploitChain {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetExploitChainList()
+}
+
+func (pm *ProjectManager) GetAgentRuntimeList() []map[string]interface{} {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetAgentRuntimeList()
+}
+
+func (pm *ProjectManager) GetDigitalHumanRoster() map[string]interface{} {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetDigitalHumanRoster()
+}
+
+func (pm *ProjectManager) GetBrainFinished() bool {
+	if pm.decisionBrain == nil {
+		return false
+	}
+	return pm.decisionBrain.IsBrainFinished()
+}
+
+func (pm *ProjectManager) TeamChat(msg string) string {
+	if pm.decisionBrain == nil {
+		return "project not started"
+	}
+	// If brain has finished and user sends a new message, restart the brain loop.
+	if pm.decisionBrain.IsBrainFinished() {
+		pm.decisionBrain.RestartAfterFinished()
+		pm.status = "正在运行"
+		// Signal the StartTask loop to restart the brain.
+		select {
+		case pm.brainRestart <- struct{}{}:
+		default:
+		}
+	}
+	return pm.decisionBrain.TeamChat(msg, "用户")
+}
+
+func (pm *ProjectManager) AppendChatMessage(msg DecisionBrain.ChatMessage) {
+	if pm.decisionBrain != nil {
+		pm.decisionBrain.AppendChatMessage(msg)
+	}
+}
+
+func (pm *ProjectManager) GetChatMessages() []DecisionBrain.ChatMessage {
+	if pm.decisionBrain == nil {
+		return nil
+	}
+	return pm.decisionBrain.GetChatMessages()
+}
+
+func (pm *ProjectManager) GetTokenUsage() map[string]interface{} {
+	if pm.decisionBrain == nil {
+		return map[string]interface{}{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+	}
+	return pm.decisionBrain.GetTokenUsage()
+}
+
+func (pm *ProjectManager) SetEnvInfo(env map[string]interface{}) {
+	pm.envInfo = env
+}
+
+func (pm *ProjectManager) SetContainer(containerList []taskManager.ContainerInfo) {
+	pm.containerList = containerList
+}
+
 func (pm *ProjectManager) SetReport(reportList map[string]string) {
 	pm.reportList = reportList
 }
 
-func (pm *ProjectManager) GetReportList() map[string]string {
-	return pm.reportList
-}
-func (pm *ProjectManager) AddReport(vid string, path string) {
-	pm.msgChan <- WebMsg{Type: "ReportAdd", Data: map[string]interface{}{vid: filepath.Base(path)}, ProjectName: pm.GetProjectName()}
-	pm.reportList[vid] = path
-}
-func (pm *ProjectManager) SetEnvInfo(env map[string]interface{}) {
-	pm.msgChan <- WebMsg{Type: "EnvInfo", Data: env, ProjectName: pm.GetProjectName()}
-	pm.envInfo = env
-}
-func (pm *ProjectManager) GetEnvInfo() map[string]interface{} {
-	return pm.envInfo
+func (pm *ProjectManager) RemoveDockerAll() {
+	if pm.dm == nil {
+		return
+	}
+	// Remove project sandbox container (aisandbox)
+	if sb, err := taskManager.GetSandbox(pm.projectName); err == nil && sb != nil {
+		if sb.ContainerId != "" {
+			misc.Debug("RemoveDockerAll: 删除 sandbox 容器 %s", sb.ContainerId)
+			_ = pm.dm.DockerRemove(sb.ContainerId)
+		}
+		taskManager.RemoveSandbox(pm.projectName)
+	}
+	// Remove containers tracked by the DecisionBrain (runtime source of truth).
+	if pm.decisionBrain != nil {
+		for _, c := range pm.decisionBrain.GetContainerList() {
+			if c == nil || c.ContainerId == "" {
+				continue
+			}
+			misc.Debug("RemoveDockerAll: 删除容器 %s", c.ContainerId)
+			_ = pm.dm.DockerRemove(c.ContainerId)
+		}
+	}
+	// Also remove any containers in the local list (e.g. restored from persistence).
+	for _, c := range pm.containerList {
+		if c.ContainerId == "" {
+			continue
+		}
+		_ = pm.dm.DockerRemove(c.ContainerId)
+	}
 }

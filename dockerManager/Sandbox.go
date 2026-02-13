@@ -1,7 +1,6 @@
-package taskManager
+package dockerManager
 
 import (
-	"AIxVuln/dockerManager"
 	"AIxVuln/llm"
 	"log"
 )
@@ -9,13 +8,13 @@ import (
 type Sandbox struct {
 	ContainerId   string
 	ContainerIp   string
-	dm            *dockerManager.DockerManager
+	dm            *DockerManager
 	SourceCodeDir string
 	sandboxEnvMsg llm.EnvMessageX
 }
 
-func NewSandbox(dm *dockerManager.DockerManager, sourceCodeDir string) *Sandbox {
-	r, err := dm.Run("aisandbox", nil, 10, dockerManager.SetVolume(sourceCodeDir, "/sourceCodeDir"))
+func NewSandbox(dm *DockerManager, sourceCodeDir string) *Sandbox {
+	r, err := dm.Run("aisandbox", nil, 10, SetVolume(sourceCodeDir, "/sourceCodeDir"), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
 		log.Fatalf("Error running aisandbox: %s", err)
 	}

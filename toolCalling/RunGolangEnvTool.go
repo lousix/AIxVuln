@@ -59,6 +59,6 @@ func (h *RunGolangEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["WebPort"] = webPort
 	msg["ContainerID"] = out.ContainerID
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunGolangEnvTool", msg, false)
+	h.task.AddKeyMessage("RunGolangEnvTool", msg, false)
 	return Success(out)
 }

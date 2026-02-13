@@ -69,6 +69,6 @@ func (h *RunMySQLEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["version"] = version
 	msg["ContainerID"] = out.ContainerID
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunMySQLEnvTool", msg, false)
+	h.task.AddKeyMessage("RunMySQLEnvTool", msg, false)
 	return Success(out)
 }

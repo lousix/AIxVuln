@@ -44,7 +44,7 @@ func (h *EnvSaveTool) Parameters() map[string]interface{} {
 					},
 					"credentials": map[string]interface{}{
 						"type":        "string",
-						"description": "Retrieving valid credentials in other formats from cookies",
+						"description": "Valid credentials that can be used for login, for example: the complete cookie string after logging in.",
 					},
 				},
 			},

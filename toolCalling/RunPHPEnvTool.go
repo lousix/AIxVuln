@@ -60,6 +60,6 @@ func (h *RunPHPEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["version"] = version
 	msg["ContainerID"] = out.ContainerID
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunPHPEnvTool", msg, false)
+	h.task.AddKeyMessage("RunPHPEnvTool", msg, false)
 	return Success(out)
 }

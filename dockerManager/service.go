@@ -3,6 +3,7 @@ package dockerManager
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,7 +46,7 @@ func (sm *ServiceManager) StartPhpEnv(version string, runPort string) (*RunResul
 	}
 	mounts := make(map[string]string)
 	mounts[absPath] = "/sourceCodeDir"
-	r, err := sm.dm.Run(imageName, []string{"sh", "-lc", "cp -r /sourceCodeDir /var/www/html && chown www-data:www-data -R /var/www/html && chmod 777 -R /var/www/html && rm -f /var/log/apache2/* && a2enmod rewrite && apache2ctl start && tail -f /dev/null"}, 600, SetVolumes(mounts), SetPort("", runPort))
+	r, err := sm.dm.Run(imageName, []string{"sh", "-lc", "cp -r /sourceCodeDir /var/www/html && chown www-data:www-data -R /var/www/html && chmod 777 -R /var/www/html && rm -f /var/log/apache2/* && a2enmod rewrite && apache2ctl start && tail -f /dev/null"}, 600, SetVolumes(mounts), SetPort("", runPort), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
 		return nil, err
 	}
@@ -62,10 +63,13 @@ func (sm *ServiceManager) StartJavaEnv(runPort string) (*RunResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := os.MkdirAll(absPath1, 0755); err != nil {
+		return nil, fmt.Errorf("创建 .m2 目录失败: %w", err)
+	}
 	mountMap := make(map[string]string)
 	mountMap[absPath] = "/sourceCodeDir"
 	mountMap[absPath1] = "/root/.m2"
-	r, err := sm.dm.Run(imageName, []string{"tail", "-f", "/dev/null"}, 600, SetVolumes(mountMap), SetPort("", runPort))
+	r, err := sm.dm.Run(imageName, []string{"tail", "-f", "/dev/null"}, 600, SetVolumes(mountMap), SetPort("", runPort), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +82,7 @@ func (sm *ServiceManager) StartPythonEnv(runPort string, version string) (*RunRe
 	if err != nil {
 		return nil, err
 	}
-	r, err := sm.dm.Run(imageName, []string{"tail", "-f", "/dev/null"}, 600, SetVolume(absPath, "/sourceCodeDir"), SetPort("", runPort))
+	r, err := sm.dm.Run(imageName, []string{"tail", "-f", "/dev/null"}, 600, SetVolume(absPath, "/sourceCodeDir"), SetPort("", runPort), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +95,7 @@ func (sm *ServiceManager) StartGolangEnv(runPort string, version string) (*RunRe
 	if err != nil {
 		return nil, err
 	}
-	r, err := sm.dm.Run(imageName, []string{"sh", "-c", "go env -w GOPROXY=https://goproxy.cn,direct && tail -f /dev/null"}, 600, SetVolume(absPath, "/sourceCodeDir"), SetPort("", runPort))
+	r, err := sm.dm.Run(imageName, []string{"sh", "-c", "go env -w GOPROXY=https://goproxy.cn,direct && tail -f /dev/null"}, 600, SetVolume(absPath, "/sourceCodeDir"), SetPort("", runPort), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
 		return nil, err
 	}
@@ -105,10 +109,13 @@ func (sm *ServiceManager) StartNodeEnv(runPort string, version string) (*RunResu
 	if err != nil {
 		return nil, err
 	}
+	if err := os.MkdirAll(absPath1, 0755); err != nil {
+		return nil, fmt.Errorf("创建 .npm 目录失败: %w", err)
+	}
 	mountMap := make(map[string]string)
 	mountMap[absPath] = "/sourceCodeDir"
 	mountMap[absPath1] = "/root/.npm"
-	r, err := sm.dm.Run(imageName, []string{"tail", "-f", "/dev/null"}, 600, SetVolumes(mountMap), SetPort("", runPort))
+	r, err := sm.dm.Run(imageName, []string{"tail", "-f", "/dev/null"}, 600, SetVolumes(mountMap), SetPort("", runPort), SetWorkingDir("/sourceCodeDir"))
 	if err != nil {
 		return nil, err
 	}
@@ -161,9 +168,9 @@ func (sm *ServiceManager) StartDockerEnv(image string, command []string, timeout
 	var out *RunResult
 
 	if webPort == "" {
-		out, err = sm.dm.Run(image, command, timeout, SetEnvs(env), SetVolume(sm.sourceCodePath, "/sourceCodeDir"))
+		out, err = sm.dm.Run(image, command, timeout, SetEnvs(env), SetVolume(sm.sourceCodePath, "/sourceCodeDir"), SetWorkingDir("/sourceCodeDir"))
 	} else {
-		out, err = sm.dm.Run(image, command, timeout, SetEnvs(env), SetVolume(sm.sourceCodePath, "/sourceCodeDir"), SetPort("", webPort))
+		out, err = sm.dm.Run(image, command, timeout, SetEnvs(env), SetVolume(sm.sourceCodePath, "/sourceCodeDir"), SetPort("", webPort), SetWorkingDir("/sourceCodeDir"))
 	}
 	return out, err
 }

@@ -55,7 +55,11 @@ func (h *RunCommandTool) Execute(parameters map[string]interface{}) string {
 		}
 		timeout = int16(timeoutTmp)
 	}
-	out, err := h.task.GetSandbox().RunCommand([]string{"sh", "-c", cmd}, timeout)
+	s, e := taskManager.GetSandbox(h.task.GetProjectName())
+	if e != nil {
+		return Fail(e.Error())
+	}
+	out, err := s.RunCommand([]string{"sh", "-c", cmd}, timeout)
 	if err != nil {
 		return Fail(err.Error())
 	}

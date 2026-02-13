@@ -50,6 +50,6 @@ func (h *RunJavaEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["WebPort"] = webPort
 	msg["ContainerID"] = out.ContainerID
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunJavaEnvTool", msg, false)
+	h.task.AddKeyMessage("RunJavaEnvTool", msg, false)
 	return Success(out)
 }

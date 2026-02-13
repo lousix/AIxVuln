@@ -58,7 +58,11 @@ func (h *RunPHPCodeTool) Execute(parameters map[string]interface{}) string {
 		}
 		timeout = int16(timeoutTmp)
 	}
-	out, err := h.task.GetSandbox().RunCommand(command, timeout)
+	s, e := taskManager.GetSandbox(h.task.GetProjectName())
+	if e != nil {
+		return Fail(e.Error())
+	}
+	out, err := s.RunCommand(command, timeout)
 	if err != nil {
 		return Fail(err.Error())
 	}

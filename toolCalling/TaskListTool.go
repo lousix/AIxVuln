@@ -67,6 +67,9 @@ func (h *TaskListTool) Execute(parameters map[string]interface{}) string {
 	}
 	Reason := ReasonTemp.(string)
 	taskList := h.task.GetTaskList()
+	if taskList[TaskID] == nil {
+		return Fail("TaskID not found")
+	}
 	taskList[TaskID]["TaskStatus"] = TaskStatus
 	taskList[TaskID]["Reason"] = Reason
 	if len(taskList) > TaskID+1 {

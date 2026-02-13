@@ -3,150 +3,57 @@ package misc
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-
-	"github.com/sashabaranov/go-openai"
-	"gopkg.in/ini.v1"
 )
 
-var (
-	cfg     *ini.File
-	mu      sync.RWMutex
-	err     error
-	clients *ClientS
-)
-
-type ClientS struct {
-	mu      sync.Mutex
-	clients map[string][]*openai.Client
-	index   map[string]int
+// GetConfigValueRequired reads a config value from SQLite.
+// It panics if the value is empty or missing.
+func GetConfigValueRequired(section, key string) string {
+	value := strings.TrimSpace(dbGet(section, key))
+	if value == "" {
+		log.Fatal(fmt.Sprintf("配置为空 %s:%s — 请在设置面板中填写", section, key))
+	}
+	return value
 }
 
-func (c *ClientS) putClient(key string, client *openai.Client) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, e := c.clients[key]
-	if !e {
-		c.clients[key] = []*openai.Client{client}
-		c.index[key] = 0
-	} else {
-		c.clients[key] = append(c.clients[key], client)
+// GetConfigValueDefault reads a config value from SQLite.
+// Returns defaultValue if the key is missing or empty.
+func GetConfigValueDefault(section, key string, defaultValue string) string {
+	value := strings.TrimSpace(dbGet(section, key))
+	if value == "" {
+		return defaultValue
 	}
+	return value
 }
 
-func (c *ClientS) getClient(key string) *openai.Client {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cli, e := c.clients[key]
-	if !e {
-		return nil
-	}
-	index, e := c.index[key]
-	if !e {
-		return nil
-	}
-	client := cli[index]
-	index++
-	if len(c.clients[key]) <= index {
-		index = 0
-	}
-	c.index[key] = index
-	return client
-}
-
-func init() {
-	cfg, err = ini.Load("config.ini")
-	if err != nil {
-		log.Fatal(err)
-	}
-	clients = &ClientS{clients: make(map[string][]*openai.Client), index: make(map[string]int)}
-}
-
-func GetClient(section ...string) *openai.Client {
-	for _, section1 := range section {
-		cli := clients.getClient(section1)
-		if cli != nil {
-			return cli
-		}
-		if !cfg.HasSection(section1) {
+// GetMaxContext returns the maximum context size in tokens.
+// It reads MaxContext (in KB) from the given config sections in order,
+// falling back to [main_setting] section. Default is 32 (KB) = 32768 tokens.
+func GetMaxContext(sections ...string) int {
+	for _, sec := range sections {
+		if sec == "" {
 			continue
 		}
-		baseUrl := GetConfigValueRequired(section1, "BASE_URL")
-		secretKey := GetConfigValueRequired(section1, "OPENAI_API_KEY")
-		if strings.Contains(secretKey, "|-|") {
-			for _, key := range strings.Split(secretKey, "|-|") {
-				config := openai.DefaultAnthropicConfig(key, baseUrl)
-				config.APIType = "Authorization"
-				client := openai.NewClientWithConfig(config)
-				clients.putClient(section1, client)
+		val := GetConfigValueDefault(sec, "MaxContext", "")
+		if val != "" {
+			kb, err := strconv.Atoi(val)
+			if err == nil && kb > 0 {
+				return kb * 1024
 			}
-		} else {
-			config := openai.DefaultAnthropicConfig(secretKey, baseUrl)
-			config.APIType = "Authorization"
-			client := openai.NewClientWithConfig(config)
-			clients.putClient(section1, client)
 		}
-		return clients.getClient(section1)
 	}
-	return nil
-}
-
-func GetConfigValueRequired(section, key string) string {
-	mu.RLock()
-	defer mu.RUnlock()
-	if cfg == nil {
-		return ""
-	}
-	if !cfg.HasSection(section) {
-		log.Fatal("配置不存在 " + section + ":" + key)
-	}
-	value := cfg.Section(section).Key(key).String()
-	value = strings.TrimSpace(value)
-	if value == "" {
-		log.Fatal("配置为空 " + section + ":" + key)
-	}
-	return value
-}
-
-func GetConfigValueDefault(section, key string, defaultValue string) string {
-	mu.RLock()
-	defer mu.RUnlock()
-	if cfg == nil {
-		return defaultValue
-	}
-	if !cfg.HasSection(section) {
-		return defaultValue
-	}
-	value := cfg.Section(section).Key(key).String()
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func GetMaxHistory() int {
-	num := GetConfigValueDefault("misc", "MaxHistory", "102400")
-	result, err := strconv.Atoi(num)
+	num := GetConfigValueDefault("main_setting", "MaxContext", "32")
+	kb, err := strconv.Atoi(num)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return result
+	return kb * 1024
 }
 
 func GetMaxTryCount() int {
 	num := GetConfigValueDefault("misc", "MaxTryCount", "3")
-	result, err := strconv.Atoi(num)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return result
-}
-
-func GetMaxRequest() int {
-	num := GetConfigValueDefault("misc", "MaxRequest", "3")
 	result, err := strconv.Atoi(num)
 	if err != nil {
 		log.Fatal(err)
@@ -164,11 +71,22 @@ func GetMessageMaximum() int {
 }
 
 func GetDataDir() string {
-	return GetConfigValueDefault("misc", "DATA_DIR", "./data")
+	dir, _ := filepath.Abs(GetConfigValueDefault("misc", "DATA_DIR", "./data"))
+	return dir
 }
 
 func GetFeiShuAPI() string {
 	return GetConfigValueDefault("misc", "FeiShuAPI", "")
+}
+
+// GetAllConfig returns all config from SQLite as map[section]map[key]value.
+func GetAllConfig() map[string]map[string]string {
+	return dbGetAll()
+}
+
+// SetAllConfig replaces all config in SQLite with the provided data.
+func SetAllConfig(data map[string]map[string]string) error {
+	return dbSetAll(data)
 }
 
 func GetCommonOpsTaskList() []map[string]string {

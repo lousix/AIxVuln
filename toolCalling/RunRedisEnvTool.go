@@ -55,6 +55,6 @@ func (h *RunRedisEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["ContainerIP"] = out.IPAddress
 	msg["RedisPassword"] = redisPassword
 	msg["version"] = version
-	h.task.AddEnvMessage("RunRedisEnvTool", msg, false)
+	h.task.AddKeyMessage("RunRedisEnvTool", msg, false)
 	return Success(out)
 }

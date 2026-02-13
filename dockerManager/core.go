@@ -46,6 +46,7 @@ type RunConfig struct {
 	Volumes    map[string]string // 卷映射 主机路径:容器路径
 	Env        []string          // 环境变量
 	AutoRemove bool              // 自动删除
+	WorkingDir string            // 容器工作目录
 }
 
 type RunResult struct {
@@ -64,11 +65,12 @@ func (dm *DockerManager) DockerRun(ctx context.Context, config *RunConfig) (*Run
 		return nil, fmt.Errorf("拉取镜像失败: %w", err)
 	}
 	containerConfig := &container.Config{
-		Image:     config.Image,
-		Cmd:       config.Cmd,
-		Env:       config.Env,
-		Tty:       false,
-		OpenStdin: false,
+		Image:      config.Image,
+		Cmd:        config.Cmd,
+		Env:        config.Env,
+		Tty:        false,
+		OpenStdin:  false,
+		WorkingDir: config.WorkingDir,
 	}
 
 	hostConfig := &container.HostConfig{
@@ -493,6 +495,13 @@ func SetEnvs(envs map[string]string) Option {
 func SetAutoRemove() Option {
 	return func(c *RunConfig) {
 		c.AutoRemove = true
+	}
+}
+
+// 设置容器工作目录
+func SetWorkingDir(dir string) Option {
+	return func(c *RunConfig) {
+		c.WorkingDir = dir
 	}
 }
 

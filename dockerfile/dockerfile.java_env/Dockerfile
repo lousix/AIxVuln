@@ -1,138 +1,98 @@
 FROM ubuntu:22.04
 ARG DEBIAN_FRONTEND=non-interactive
 ENV TZ=Asia/Shanghai
-# 设置镜像源
-RUN sed -i "s/ports.ubuntu.com/mirrors.aliyun.com/g" /etc/apt/sources.list && \
+
+# 设置镜像源（兼容 amd64 用 archive.ubuntu.com、arm64 用 ports.ubuntu.com）
+RUN sed -i "s|http://archive.ubuntu.com|http://mirrors.aliyun.com|g" /etc/apt/sources.list && \
+    sed -i "s|http://security.ubuntu.com|http://mirrors.aliyun.com|g" /etc/apt/sources.list && \
+    sed -i "s|http://ports.ubuntu.com|http://mirrors.aliyun.com|g" /etc/apt/sources.list && \
     apt update && \
-    apt install -y wget
+    apt install -y wget zip unzip curl tomcat9 mysql-client
 
-# 获取系统架构并设置JDK URL
-RUN ARCH=$(uname -m); \
-    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
-        echo "Detected ARM64 architecture"; \
-        JDK_8_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/8/jdk/aarch64/linux/OpenJDK8U-jdk_aarch64_linux_hotspot_8u472b08.tar.gz"; \
-        JDK_11_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jdk/aarch64/linux/OpenJDK11U-jdk_aarch64_linux_hotspot_11.0.29_7.tar.gz"; \
-        JDK_17_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/aarch64/linux/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.17_10.tar.gz"; \
-        JDK_21_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/21/jdk/aarch64/linux/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz"; \
-        JDK_25_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/25/jdk/aarch64/linux/OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.1_8.tar.gz"; \
-    elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then \
-        echo "Detected x86_64 architecture"; \
-        JDK_8_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/8/jdk/x64/linux/OpenJDK8U-jdk_x64_linux_hotspot_8u472b08.tar.gz"; \
-        JDK_11_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/11/jdk/x64/linux/OpenJDK11U-jdk_x64_linux_hotspot_11.0.29_7.tar.gz"; \
-        JDK_17_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/17/jdk/x64/linux/OpenJDK17U-jdk_x64_linux_hotspot_17.0.17_10.tar.gz"; \
-        JDK_21_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/21/jdk/x64/linux/OpenJDK21U-jdk_x64_linux_hotspot_21.0.9_10.tar.gz"; \
-        JDK_25_URL="https://mirrors.tuna.tsinghua.edu.cn/Adoptium/25/jdk/x64/linux/OpenJDK25U-jdk_x64_linux_hotspot_25.0.1_8.tar.gz"; \
-    else \
-        echo "Unsupported architecture: $ARCH"; \
-        exit 1; \
-    fi; \
-    echo "Downloading JDKs..."; \
-    mkdir -p /opt/java && \
-    wget "$JDK_8_URL" -O /tmp/jdk-8.tar.gz && \
-    tar -zxvf /tmp/jdk-8.tar.gz -C /opt/java && \
-    mv /opt/java/* /opt/java-8 2>/dev/null || true && \
-    rm -rf /opt/java && \
-    mkdir -p /opt/java && \
-    wget "$JDK_11_URL" -O /tmp/jdk-11.tar.gz && \
-    tar -zxvf /tmp/jdk-11.tar.gz -C /opt/java && \
-    mv /opt/java/* /opt/java-11 2>/dev/null || true && \
-    rm -rf /opt/java && \
-    mkdir -p /opt/java && \
-    wget "$JDK_17_URL" -O /tmp/jdk-17.tar.gz && \
-    tar -zxvf /tmp/jdk-17.tar.gz -C /opt/java && \
-    mv /opt/java/* /opt/java-17 2>/dev/null || true && \
-    rm -rf /opt/java && \
-    mkdir -p /opt/java && \
-    wget "$JDK_21_URL" -O /tmp/jdk-21.tar.gz && \
-    tar -zxvf /tmp/jdk-21.tar.gz -C /opt/java && \
-    mv /opt/java/* /opt/java-21 2>/dev/null || true && \
-    rm -rf /opt/java && \
-    mkdir -p /opt/java && \
-    wget "$JDK_25_URL" -O /tmp/jdk-25.tar.gz && \
-    tar -zxvf /tmp/jdk-25.tar.gz -C /opt/java && \
-    mv /opt/java/* /opt/java-25 2>/dev/null || true && \
-    rm -rf /opt/java && \
-    rm -f /tmp/jdk-*.tar.gz
+# 安装 SDKMAN（跳过 native CLI 下载，避免 404）
+COPY sdk /usr/local/bin/sdk
+ENV SDKMAN_DIR="/root/.sdkman"
+RUN bash -c "export SDKMAN_NATIVE=false && curl -s https://get.sdkman.io | bash" && \
+    mkdir -p "$SDKMAN_DIR/etc" && \
+    echo "sdkman_auto_answer=true" >> "$SDKMAN_DIR/etc/config" && \
+    echo "sdkman_auto_selfupdate=false" >> "$SDKMAN_DIR/etc/config" && \
+    echo "sdkman_selfupdate_feature=false" >> "$SDKMAN_DIR/etc/config" && \
+    chmod a+x "$SDKMAN_DIR/bin/sdkman-init.sh" && \
+    chmod +x /usr/local/bin/sdk
 
-# 验证安装
-RUN echo "Verifying JDK installations..." && \
-    ls -la /opt/java-* && \
-    for version in 8 11 17 21 25; do \
-        echo "Java $version:" && \
-        ls -d /opt/java-$version/* 2>/dev/null | head -1; \
+# 通过 SDKMAN 安装 JDK（Temurin）
+# SDKMAN 自动处理架构检测（aarch64/x86_64）
+RUN sdk install java 8.0.442-tem && \
+    sdk install java 11.0.26-tem && \
+    sdk install java 17.0.14-tem && \
+    sdk install java 21.0.6-tem && \
+    sdk install java 24.0.1-tem
+
+# 设置默认 Java 为 11
+RUN sdk default java 11.0.26-tem
+
+# SDKMAN candidates 目录
+ENV JAVA_CANDIDATES_DIR="/root/.sdkman/candidates/java"
+
+# 在标准路径创建符号链接（指向 SDKMAN current）
+RUN ln -sf ${JAVA_CANDIDATES_DIR}/current/bin/java /usr/bin/java && \
+    ln -sf ${JAVA_CANDIDATES_DIR}/current/bin/javac /usr/bin/javac && \
+    ln -sf ${JAVA_CANDIDATES_DIR}/current/bin/jar /usr/bin/jar
+
+# jdk 切换脚本 — 通过 SDKMAN 切换并更新 /usr/bin 符号链接
+RUN cat > /usr/local/bin/jdk << 'SCRIPT'
+#!/bin/bash
+CANDIDATES_DIR="/root/.sdkman/candidates/java"
+
+update_links() {
+    ln -sf "${CANDIDATES_DIR}/current/bin/java"  /usr/bin/java
+    ln -sf "${CANDIDATES_DIR}/current/bin/javac" /usr/bin/javac
+    ln -sf "${CANDIDATES_DIR}/current/bin/jar"   /usr/bin/jar
+}
+
+# 从已安装版本中查找匹配的完整版本号
+find_version() {
+    local major="$1"
+    ls -1 "$CANDIDATES_DIR" 2>/dev/null | grep -v current | while read dir; do
+        case "$dir" in
+            ${major}.0.*-tem|${major}.0.*-open|${major}.*-tem|${major}.*-open) echo "$dir"; return ;;
+        esac
     done
+}
 
-# 设置默认Java版本为11
-RUN ln -sf /opt/java-11 /opt/java-current
-
-# 在标准路径创建符号链接
-RUN ln -sf /opt/java-current/bin/java /usr/bin/java && \
-    ln -sf /opt/java-current/bin/javac /usr/bin/javac && \
-    ln -sf /opt/java-current/bin/jar /usr/bin/jar
-
-# 创建简单的切换脚本 - 使用heredoc格式避免转义问题
-RUN cat > /usr/local/bin/jdk << 'EOF'
-#!/bin/sh
-case $1 in
-    8) 
-        ln -sf /opt/java-8 /opt/java-current
-        ln -sf /opt/java-8/bin/java /usr/bin/java
-        ln -sf /opt/java-8/bin/javac /usr/bin/javac
-        ln -sf /opt/java-8/bin/jar /usr/bin/jar
-        echo "Switched to Java 8"
-        ;;
-    11)
-        ln -sf /opt/java-11 /opt/java-current
-        ln -sf /opt/java-11/bin/java /usr/bin/java
-        ln -sf /opt/java-11/bin/javac /usr/bin/javac
-        ln -sf /opt/java-11/bin/jar /usr/bin/jar
-        echo "Switched to Java 11"
-        ;;
-    17)
-        ln -sf /opt/java-17 /opt/java-current
-        ln -sf /opt/java-17/bin/java /usr/bin/java
-        ln -sf /opt/java-17/bin/javac /usr/bin/javac
-        ln -sf /opt/java-17/bin/jar /usr/bin/jar
-        echo "Switched to Java 17"
-        ;;
-    21)
-        ln -sf /opt/java-21 /opt/java-current
-        ln -sf /opt/java-21/bin/java /usr/bin/java
-        ln -sf /opt/java-21/bin/javac /usr/bin/javac
-        ln -sf /opt/java-21/bin/jar /usr/bin/jar
-        echo "Switched to Java 21"
-        ;;
-    25)
-        ln -sf /opt/java-25 /opt/java-current
-        ln -sf /opt/java-25/bin/java /usr/bin/java
-        ln -sf /opt/java-25/bin/javac /usr/bin/javac
-        ln -sf /opt/java-25/bin/jar /usr/bin/jar
-        echo "Switched to Java 25"
+case "$1" in
+    8|11|17|21|24)
+        ver=$(find_version "$1")
+        if [ -z "$ver" ]; then
+            echo "Java $1 not installed. Available:"
+            ls -1 "$CANDIDATES_DIR" | grep -v current
+            exit 1
+        fi
+        ln -sfn "${CANDIDATES_DIR}/${ver}" "${CANDIDATES_DIR}/current"
+        update_links
+        echo "Switched to Java $1 ($ver)"
+        java -version 2>&1 | head -1
         ;;
     list|ls)
-        echo "Available Java versions: 8, 11, 17, 21, 25"
+        echo "Installed Java versions:"
+        ls -1 "$CANDIDATES_DIR" | grep -v current
+        echo ""
+        echo "Current: $(basename "$(readlink -f "${CANDIDATES_DIR}/current")")"
         ;;
     current|version)
-        echo "Current Java version:"
+        echo "Current: $(basename "$(readlink -f "${CANDIDATES_DIR}/current")")"
         java -version 2>&1 | head -1
         ;;
     *)
-        echo "Usage: jdk [8|11|17|21|25|list|current]"
+        echo "Usage: jdk [8|11|17|21|24|list|current]"
         exit 1
         ;;
 esac
-EOF
+SCRIPT
+RUN chmod +x /usr/local/bin/jdk
 
-COPY sdk /usr/local/bin/sdk
-
-# 需要设置代理否则太慢了
-RUN apt install -y zip unzip curl tomcat9 && \
-    export https_proxy=http://192.168.1.15:7890 http_proxy=http://192.168.1.15:7890 all_proxy=socks5://192.168.1.15:7890 && \
-    curl -s "https://get.sdkman.io" | bash && \
-    chmod a+x "$HOME/.sdkman/bin/sdkman-init.sh" && \
-    chmod +x /usr/local/bin/jdk && \
-    chmod +x /usr/local/bin/sdk && \ 
-    sdk install maven 3.8.6 && \
+# 通过 SDKMAN 安装 Maven 和 Gradle 多版本
+RUN sdk install maven 3.8.6 && \
     sdk install maven 3.6.3 && \
     sdk install maven 3.5.4 && \
     sdk install maven 3.3.9 && \
@@ -140,8 +100,7 @@ RUN apt install -y zip unzip curl tomcat9 && \
     sdk install gradle 7.5 && \
     sdk install gradle 6.9 && \
     sdk install gradle 5.6.4 && \
-    sdk install gradle 4.10.3 && \
-    sdk install gradle 3.5.4
+    sdk install gradle 4.10.3
 
 COPY gradle-v /usr/local/bin/gradle-v
 COPY mvn-v /usr/local/bin/mvn-v
@@ -167,13 +126,18 @@ EOF
 
 RUN chmod +x /usr/local/bin/mvn
 
-RUN apt install mysql-client -y
+# 验证安装
+RUN echo "=== JDK versions ===" && jdk list && \
+    echo "=== Current Java ===" && java -version 2>&1 && \
+    echo "=== Maven ===" && ${SDKMAN_DIR}/candidates/maven/current/bin/mvn --version 2>&1 | head -1 && \
+    echo "=== Gradle ===" && ${SDKMAN_DIR}/candidates/gradle/current/bin/gradle --version 2>&1 | head -1
 
 WORKDIR /root
-# 设置sdkman环境变量
+# 设置环境变量
+ENV JAVA_HOME=/root/.sdkman/candidates/java/current
 ENV MAVEN_HOME=/root/.sdkman/candidates/maven/current
 ENV GRADLE_HOME=/root/.sdkman/candidates/gradle/current
-ENV PATH="/usr/local/bin:$MAVEN_HOME/bin:$GRADLE_HOME/bin:$PATH"
+ENV PATH="/usr/local/bin:$JAVA_HOME/bin:$MAVEN_HOME/bin:$GRADLE_HOME/bin:$PATH"
 EXPOSE 8080
 
 CMD ["tail", "-f", "/dev/null"]

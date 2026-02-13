@@ -111,6 +111,6 @@ func (h *DockerRunTool) Execute(parameters map[string]interface{}) string {
 	msg["image"] = image
 	msg["command"] = command
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunJavaEnvTool", msg, true)
+	h.task.AddKeyMessage("RunJavaEnvTool", msg, true)
 	return Success(out)
 }

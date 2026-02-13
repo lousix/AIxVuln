@@ -1,7 +1,6 @@
 package Web
 
 import (
-	"AIxVuln/ProjectManager"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -27,6 +26,20 @@ type ClientManager struct {
 }
 
 func handleWebSocket(c *gin.Context, manager *ClientManager) {
+	// Validate token before upgrading.
+	token := c.Query("token")
+	if token == "" {
+		// Also accept Authorization header.
+		auth := c.GetHeader("Authorization")
+		if len(auth) > 7 {
+			token = auth[7:]
+		}
+	}
+	if _, err := validateToken(token); err != nil {
+		c.JSON(401, gin.H{"error": "unauthorized"})
+		return
+	}
+
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("WebSocket升级失败: %v", err)
@@ -60,25 +73,18 @@ func handleWebSocket(c *gin.Context, manager *ClientManager) {
 	log.Printf("客户端断开，当前连接数: %d", clientCount)
 }
 
-// 发送消息给单个客户端
-func sendMessage(conn *websocket.Conn, msg ProjectManager.WebMsg) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		log.Printf("消息序列化失败: %v", err)
-		return
-	}
-
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		log.Printf("发送消息失败: %v", err)
-		conn.Close()
-	}
+type projectEnvelope struct {
+	ProjectName string `json:"projectName"`
 }
 
-// 广播消息给所有客户端
-func (m *ClientManager) Broadcast(msg ProjectManager.WebMsg) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		log.Printf("广播消息序列化失败: %v", err)
+// 广播消息给所有客户端（msgJSON 已经是 JSON 字符串）
+func (m *ClientManager) Broadcast(msgJSON string) {
+	var env projectEnvelope
+	if err := json.Unmarshal([]byte(msgJSON), &env); err != nil {
+		log.Printf("广播消息反序列化失败: %v", err)
+		return
+	}
+	if env.ProjectName == "" {
 		return
 	}
 
@@ -90,12 +96,12 @@ func (m *ClientManager) Broadcast(msg ProjectManager.WebMsg) {
 
 	m.mu.RLock()
 	for pn := range m.clients {
-		if pn != msg.ProjectName {
+		if pn != env.ProjectName {
 			continue
 		}
 		clients := m.clients[pn]
 		for conn := range clients {
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msgJSON)); err != nil {
 				log.Printf("广播发送失败: %v", err)
 				conn.Close()
 				bad = append(bad, badConn{pn: pn, conn: conn})
@@ -119,8 +125,8 @@ func (m *ClientManager) Broadcast(msg ProjectManager.WebMsg) {
 }
 
 // 定时广播函数
-func startBroadcasting(manager *ClientManager, channel chan ProjectManager.WebMsg) {
-	for msg := range channel {
-		manager.Broadcast(msg)
+func startBroadcasting(manager *ClientManager, channel chan string) {
+	for msgJSON := range channel {
+		manager.Broadcast(msgJSON)
 	}
 }

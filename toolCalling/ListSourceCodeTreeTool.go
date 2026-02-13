@@ -3,6 +3,7 @@ package toolCalling
 import (
 	"AIxVuln/misc"
 	"AIxVuln/taskManager"
+	"fmt"
 	"strings"
 )
 
@@ -44,6 +45,7 @@ func (h *ListSourceCodeTreeTool) Execute(parameters map[string]interface{}) stri
 		return Fail("Missing 'path' parameter")
 	}
 	path := pathTemp.(string)
+	root := h.task.GetSm().GetSourceCodePath()
 	maxDepthTemp := parameters["maxDepth"]
 	var maxDepth = 1
 	if maxDepthTemp != nil {
@@ -52,10 +54,12 @@ func (h *ListSourceCodeTreeTool) Execute(parameters map[string]interface{}) stri
 	if strings.HasPrefix(path, "/sourceCodeDir") {
 		path = strings.TrimPrefix(path, "/sourceCodeDir")
 	}
-	path = h.task.GetSm().GetSourceCodePath() + "/" + path
+	path = root + "/" + path
 	r, e := misc.ListSourceCodeTree(path, maxDepth)
 	if e != nil {
-		return Fail(e.Error())
+		return Fail(sanitizeTextPaths(root, e.Error()))
 	}
-	return Success(r)
+	lineCount := strings.Count(r, "\n")
+	header := fmt.Sprintf("[Total lines: %d]\n", lineCount)
+	return Success(header + r)
 }

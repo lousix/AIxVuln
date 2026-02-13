@@ -60,6 +60,6 @@ func (h *RunNodeEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["WebPort"] = webPort
 	msg["ContainerID"] = out.ContainerID
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunNodeEnvTool", msg, false)
+	h.task.AddKeyMessage("RunNodeEnvTool", msg, false)
 	return Success(out)
 }

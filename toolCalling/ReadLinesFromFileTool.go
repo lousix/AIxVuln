@@ -50,6 +50,7 @@ func (h *ReadLinesFromFileTool) Execute(parameters map[string]interface{}) strin
 		return Fail("Missing 'path' parameter")
 	}
 	path := pathTemp.(string)
+	root := h.task.GetSourceCodePath()
 	var lineNumber int
 	var lineCount int
 	lineNumberTemp := parameters["lineNumber"]
@@ -67,10 +68,10 @@ func (h *ReadLinesFromFileTool) Execute(parameters map[string]interface{}) strin
 	if strings.HasPrefix(path, "/sourceCodeDir") {
 		path = strings.TrimPrefix(path, "/sourceCodeDir")
 	}
-	path = h.task.GetSourceCodePath() + "/" + path
+	path = root + "/" + path
 	r, e := misc.ReadLinesFromFile(path, lineNumber, lineCount)
 	if e != nil {
-		return Fail(e.Error())
+		return Fail(sanitizeTextPaths(root, e.Error()))
 	}
 	return Success(r)
 }

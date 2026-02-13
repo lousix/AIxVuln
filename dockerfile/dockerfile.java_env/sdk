@@ -2,7 +2,7 @@
 export SDKMAN_DIR="$HOME/.sdkman"
 if [[ -s "$SDKMAN_DIR/bin/sdkman-init.sh" ]]; then
     source "$SDKMAN_DIR/bin/sdkman-init.sh" > /dev/null 2>&1
-    echo "`sdk $@`"
+    sdk "$@"
 else
     echo "SDKMAN! not found" >&2
     exit 1

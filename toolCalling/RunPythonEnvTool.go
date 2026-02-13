@@ -59,6 +59,6 @@ func (h *RunPythonEnvTool) Execute(parameters map[string]interface{}) string {
 	msg["WebPort"] = webPort
 	msg["ContainerID"] = out.ContainerID
 	msg["ContainerIP"] = out.IPAddress
-	h.task.AddEnvMessage("RunPythonEnvTool", msg, false)
+	h.task.AddKeyMessage("RunPythonEnvTool", msg, false)
 	return Success(out)
 }

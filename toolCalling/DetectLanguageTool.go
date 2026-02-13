@@ -38,6 +38,42 @@ var fileExtensions = map[ProjectType][]string{
 	Rust:   {".rs", ".rlib"},
 }
 
+var nodeStrongIndicators = map[string]struct{}{
+	"package.json":       {},
+	"package-lock.json":  {},
+	"yarn.lock":          {},
+	"pnpm-lock.yaml":     {},
+	"node_modules":       {},
+	"tsconfig.json":      {},
+	"deno.json":          {},
+	"deno.jsonc":         {},
+	"bun.lockb":          {},
+	"bun.lock":           {},
+	"vite.config.js":     {},
+	"vite.config.ts":     {},
+	"next.config.js":     {},
+	"next.config.mjs":    {},
+	"next.config.ts":     {},
+	"nuxt.config.js":     {},
+	"nuxt.config.ts":     {},
+	"svelte.config.js":   {},
+	"astro.config.mjs":   {},
+	"astro.config.ts":    {},
+	"angular.json":       {},
+	"vue.config.js":      {},
+	"webpack.config.js":  {},
+	"webpack.config.ts":  {},
+	"rollup.config.js":   {},
+	"rollup.config.ts":   {},
+	"esbuild.config.js":  {},
+	"esbuild.config.ts":  {},
+	"nx.json":            {},
+	"lerna.json":         {},
+	"turbo.json":         {},
+	".nvmrc":             {},
+	".node-version":      {},
+}
+
 type DetectLanguageTool struct {
 	task *taskManager.Task
 }
@@ -65,6 +101,7 @@ func (h *DetectLanguageTool) Execute(parameters map[string]interface{}) string {
 
 func DetectProjectType(rootPath string) ProjectType {
 	typeScores := make(map[ProjectType]int)
+	nodeStrong := false
 
 	// 遍历目录
 	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
@@ -74,6 +111,9 @@ func DetectProjectType(rootPath string) ProjectType {
 
 		// 检查包管理文件
 		baseName := d.Name()
+		if _, ok := nodeStrongIndicators[baseName]; ok {
+			nodeStrong = true
+		}
 		for projectType, files := range packageManagers {
 			for _, file := range files {
 				if baseName == file {
@@ -87,6 +127,9 @@ func DetectProjectType(rootPath string) ProjectType {
 		if !d.IsDir() {
 			ext := strings.ToLower(filepath.Ext(baseName))
 			for projectType, exts := range fileExtensions {
+				if projectType == NodeJS && !nodeStrong {
+					continue
+				}
 				for _, extension := range exts {
 					if ext == extension {
 						typeScores[projectType] += 1

@@ -1,12 +1,8 @@
 package llm
 
 import (
-	"AIxVuln/misc"
-	"log"
 	"strings"
 	"sync"
-
-	"github.com/sashabaranov/go-openai"
 )
 
 // 用于多个Agent同时运行，既能保证单个Agent上下文不被污染，又能保证关键信息共享，并且允许同时为多个Agent的上下文添加重要记忆点
@@ -90,31 +86,10 @@ func (cm *SharedContext) AddMessage(x *MessageX) {
 	} else {
 		c, f := cm.Contexts[x.ContextId]
 		if !f {
-			log.Fatal("Context not found in contextManager")
+			panic("Context not found in contextManager")
 		}
 		c.AddMessage(x)
-		if x.Msg.Role == openai.ChatMessageRoleAssistant {
-			content := x.Msg.Content
-			line := strings.TrimSpace(getLastLine(content))
-			if strings.HasPrefix(line, "SharedMessage:") {
-				msgC := "SharedMessage from other AI assistants: " + strings.TrimPrefix(line, "SharedMessage:")
-				misc.Success("Agent重点记忆共享", msgC, cm.eventHandler)
-				msg := openai.ChatCompletionMessage{Role: openai.ChatMessageRoleAssistant, Content: msgC}
-				for id, context := range cm.Contexts {
-					if id != x.ContextId {
-						msgX := &MessageX{
-							ContextId: x.ContextId,
-							Msg:       msg,
-						}
-						context.AddMessage(msgX)
-					}
-				}
-
-			}
-
-		}
 	}
-
 }
 
 func (cm *SharedContext) SetTaskList(x *TaskListX) {
@@ -122,7 +97,7 @@ func (cm *SharedContext) SetTaskList(x *TaskListX) {
 	defer cm.mu.Unlock()
 	c, f := cm.Contexts[x.ContextId]
 	if !f {
-		log.Fatal("Context not found in contextManager")
+		panic("Context not found in contextManager")
 	}
 	c.SetTaskList(x)
 }
@@ -133,7 +108,7 @@ func (cm *SharedContext) AddKeyMessage(x *EnvMessageX) {
 	if x.NotShared {
 		c, f := cm.Contexts[x.ContextId]
 		if !f {
-			log.Fatal("Context not found in contextManager")
+			panic("Context not found in contextManager")
 		}
 		c.AddKeyMessage(x)
 	} else {
@@ -152,20 +127,140 @@ func (cm *SharedContext) SetSystemPrompt(x *SystemPromptX) {
 	defer cm.mu.Unlock()
 	c, f := cm.Contexts[x.ContextId]
 	if !f {
-		log.Fatal("Context not found in contextManager")
+		panic("Context not found in contextManager")
 	}
-	x.SystemPrompt = x.SystemPrompt + "\nImportant reminder: There are multiple AI assistants performing the same tasks as you. If you believe you have discovered important information, end your reply with exactly one line starting with 'SharedMessage:' followed by your message on the same line. If there is no important information, avoid ending your last line with 'SharedMessage:'."
 	c.SetSystemPrompt(x)
 }
 
-func (cm *SharedContext) GetContext(id string) []openai.ChatCompletionMessage {
+func (cm *SharedContext) SetTeamMessageHandler(f func(senderName string, msg string)) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, context := range cm.Contexts {
+		context.SetTeamMessageHandler(f)
+	}
+}
+
+func (cm *SharedContext) SetUserMessageHandler(f func(senderCtxId string, msg string)) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, context := range cm.Contexts {
+		context.SetUserMessageHandler(f)
+	}
+}
+
+func (cm *SharedContext) SetBrainMessageHandler(f func(senderCtxId string, msg string)) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, context := range cm.Contexts {
+		context.SetBrainMessageHandler(f)
+	}
+}
+
+func (cm *SharedContext) SetExtraSystemPrompt(prompt string, contextId string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	c, f := cm.Contexts[contextId]
+	if !f {
+		panic("Context not found in contextManager")
+	}
+	c.SetExtraSystemPrompt(prompt, contextId)
+}
+
+func (cm *SharedContext) GetContext(id string) []Message {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	c, f := cm.Contexts[id]
 	if !f {
-		log.Fatal("Context not found in contextManager")
+		panic("Context not found in contextManager")
 	}
 	return c.GetContext(id)
+}
+func (cm *SharedContext) GetMsgSize(id string) int {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	c, f := cm.Contexts[id]
+	if !f {
+		panic("Context not found in contextManager")
+	}
+	return c.GetMsgSize(id)
+}
+
+// CompressIfNeeded delegates compression to all underlying context managers.
+func (cm *SharedContext) CompressIfNeeded(cli Client, model string) error {
+	cm.mu.Lock()
+	// Collect references under lock, then compress outside lock to avoid holding it during LLM call.
+	managers := make([]*ContextManager, 0, len(cm.Contexts))
+	for _, ctx := range cm.Contexts {
+		managers = append(managers, ctx)
+	}
+	cm.mu.Unlock()
+	for _, mgr := range managers {
+		if err := mgr.CompressIfNeeded(cli, model); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetMemoryWithSummary delegates memory reset to all underlying context managers.
+func (cm *SharedContext) ResetMemoryWithSummary(cli Client, model string) error {
+	cm.mu.Lock()
+	managers := make([]*ContextManager, 0, len(cm.Contexts))
+	for _, ctx := range cm.Contexts {
+		managers = append(managers, ctx)
+	}
+	cm.mu.Unlock()
+	for _, mgr := range managers {
+		if err := mgr.ResetMemoryWithSummary(cli, model); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AckPendingUserMessage is a no-op now that injection is synchronized via
+// LockForLLM/UnlockForLLM. Kept for interface compatibility.
+func (cm *SharedContext) AckPendingUserMessage() {}
+
+// LockForLLM locks all underlying context managers for LLM request.
+func (cm *SharedContext) LockForLLM() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, ctx := range cm.Contexts {
+		ctx.LockForLLM()
+	}
+}
+
+// UnlockForLLM unlocks all underlying context managers after LLM request.
+func (cm *SharedContext) UnlockForLLM() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, ctx := range cm.Contexts {
+		ctx.UnlockForLLM()
+	}
+}
+
+// HasPendingUserMessage returns true if any context manager has a pending user message.
+func (cm *SharedContext) HasPendingUserMessage() bool {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	for _, ctx := range cm.Contexts {
+		if ctx.HasPendingUserMessage() {
+			return true
+		}
+	}
+	return false
+}
+
+// PopPendingUserMessages pops pending user messages from all sub-contexts.
+func (cm *SharedContext) PopPendingUserMessages() []Message {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	var result []Message
+	for _, ctx := range cm.Contexts {
+		result = append(result, ctx.PopPendingUserMessages()...)
+	}
+	return result
 }
 
 func getLastLine(text string) string {

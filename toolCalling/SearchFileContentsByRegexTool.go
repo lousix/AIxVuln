@@ -3,6 +3,7 @@ package toolCalling
 import (
 	"AIxVuln/misc"
 	"AIxVuln/taskManager"
+	"fmt"
 	"strings"
 )
 
@@ -42,6 +43,7 @@ func (h *SearchFileContentsByRegexTool) Execute(parameters map[string]interface{
 		return Fail("Missing 'path' parameter")
 	}
 	path := pathTemp.(string)
+	root := h.task.GetSourceCodePath()
 	patternTemp := parameters["pattern"]
 	var pattern string
 	if patternTemp == nil {
@@ -51,10 +53,17 @@ func (h *SearchFileContentsByRegexTool) Execute(parameters map[string]interface{
 	if strings.HasPrefix(path, "/sourceCodeDir") {
 		path = strings.TrimPrefix(path, "/sourceCodeDir")
 	}
-	path = h.task.GetSourceCodePath() + "/" + path
+	path = root + "/" + path
 	r, e := misc.SearchFileContentsByRegex(path, pattern)
 	if e != nil {
-		return Fail(e.Error())
+		return Fail(sanitizeTextPaths(root, e.Error()))
 	}
-	return Success(r)
+	for i := range r {
+		r[i].FilePath = relPathForLLM(root, r[i].FilePath)
+	}
+	return Success(map[string]interface{}{
+		"total_matches": len(r),
+		"hint":          fmt.Sprintf("Found %d matching lines. If too many, narrow your regex or search path.", len(r)),
+		"matches":       r,
+	})
 }

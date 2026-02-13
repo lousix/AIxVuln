@@ -90,7 +90,11 @@ func (h *RunSQLTool) Execute(parameters map[string]interface{}) string {
 		}
 		timeout = int16(timeoutTmp)
 	}
-	out, err := h.task.GetSandbox().RunCommand(command, timeout)
+	s, e := taskManager.GetSandbox(h.task.GetProjectName())
+	if e != nil {
+		return Fail(e.Error())
+	}
+	out, err := s.RunCommand(command, timeout)
 	out = strings.ReplaceAll(out, "mysql: [Warning] Using a password on the command line interface can be insecure.\n", "")
 	if err != nil {
 		return Fail(err.Error())
